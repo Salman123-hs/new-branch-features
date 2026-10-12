@@ -4,6 +4,58 @@ import { authenticate } from "../shopify.server";
 import { connectDB } from "../mongo.server";
 import { Pincode } from "../models/pincode.server";
 
+type CsvRow = { pincode: string; minDays: number; maxDays: number; codAvailable: boolean };
+
+const MAX_ROWS = 50000;
+
+// CSV text ko rows mein badalta hai, galat rows ka hisaab rakhta hai
+function parseCsv(text: string) {
+  const rows: CsvRow[] = [];
+  const errors: string[] = [];
+  const lines = text.replace(/^\uFEFF/, "").split(/\r?\n/); // Excel ka BOM hatao
+
+  lines.forEach((line, index) => {
+    const lineNo = index + 1;
+    if (!line.trim()) return; // khaali line
+
+    const cells = line.split(",").map((c) => c.trim().replace(/^"|"$/g, ""));
+
+    // pehli line header ho (jaise "pincode,...") to skip
+    if (lineNo === 1 && !/^\d+$/.test(cells[0])) return;
+
+    const [pin, min, max, cod] = cells;
+
+    if (!/^\d{6}$/.test(pin)) {
+      errors.push(`Row ${lineNo}: invalid pincode "${pin}"`);
+      return;
+    }
+
+    const minDays = min ? Number(min) : 3;
+    const maxDays = max ? Number(max) : 5;
+
+    if (!Number.isInteger(minDays) || !Number.isInteger(maxDays) || minDays < 0 || maxDays < 0) {
+      errors.push(`Row ${lineNo}: days must be whole numbers`);
+      return;
+    }
+    if (minDays > maxDays) {
+      errors.push(`Row ${lineNo}: min days cannot be greater than max days`);
+      return;
+    }
+
+    const codText = (cod || "yes").toLowerCase();
+    const codAvailable = !["no", "false", "0", "n"].includes(codText);
+
+    rows.push({ pincode: pin, minDays, maxDays, codAvailable });
+  });
+
+  return { rows, errors };
+}
+
+const CSV_EXAMPLE = `pincode,min_days,max_days,cod
+452001,2,4,yes
+110001,3,5,yes
+400001,4,7,no`;
+
 // Page khulte hi: is store ke saare pincodes laao
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -25,6 +77,48 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const { session } = await authenticate.admin(request);
   await connectDB();
   const form = await request.formData();
+
+    // CSV bulk upload
+  if (form.get("intent") === "csv") {
+    const file = form.get("file");
+
+    if (!(file instanceof File) || file.size === 0) {
+      return { ok: false, source: "csv", message: "Please choose a CSV file" };
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      return { ok: false, source: "csv", message: "File is too large (max 5 MB)" };
+    }
+
+    const { rows, errors } = parseCsv(await file.text());
+
+    if (rows.length > MAX_ROWS) {
+      return { ok: false, source: "csv", message: `Too many rows (max ${MAX_ROWS})` };
+    }
+    if (rows.length === 0) {
+      return { ok: false, source: "csv", message: "No valid rows found", errors: errors.slice(0, 10) };
+    }
+
+    // ek-ek ki jagah 1000-1000 ke batch mein save (bahut tez)
+    const ops = rows.map((r) => ({
+      updateOne: {
+        filter: { shop: session.shop, pincode: r.pincode },
+        update: { $set: { minDays: r.minDays, maxDays: r.maxDays, codAvailable: r.codAvailable } },
+        upsert: true,
+      },
+    }));
+    for (let i = 0; i < ops.length; i += 1000) {
+      await Pincode.bulkWrite(ops.slice(i, i + 1000), { ordered: false });
+    }
+
+    return {
+      ok: true,
+      source: "csv",
+      message:
+        `${rows.length} pincodes imported` +
+        (errors.length ? `, ${errors.length} rows skipped` : ""),
+      errors: errors.slice(0, 10),
+    };
+  }
 
   if (form.get("intent") === "delete") {
     await Pincode.deleteOne({ _id: String(form.get("id")), shop: session.shop });
@@ -56,6 +150,7 @@ export default function PincodesPage() {
   const result = useActionData<typeof action>();
   const nav = useNavigation();
   const saving = nav.state === "submitting";
+  const isCsv = !!result && "source" in result && result.source === "csv";
 
   return (
     <s-page heading="Pincodes">
@@ -80,8 +175,42 @@ export default function PincodesPage() {
             {saving ? "Saving..." : "Save"}
           </button>
         </Form>
-        {result && (
+                {result && !isCsv && (
           <p style={{ color: result.ok ? "green" : "red", marginTop: 12 }}>{result.message}</p>
+        )}
+      </s-section>
+
+            <s-section heading="Bulk upload (CSV)">
+        <p style={{ marginTop: 0 }}>
+          Columns: <b>pincode, min_days, max_days, cod</b>. Existing pincodes will be updated.
+        </p>
+        <pre style={{ background: "#f6f6f7", padding: 10, borderRadius: 6, fontSize: 13 }}>
+          {CSV_EXAMPLE}
+        </pre>
+
+        <Form
+          method="post"
+          encType="multipart/form-data"
+          style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}
+        >
+          <input type="hidden" name="intent" value="csv" />
+          <input type="file" name="file" accept=".csv,text/csv" required />
+          <button type="submit" disabled={saving}>
+            {saving ? "Uploading..." : "Upload CSV"}
+          </button>
+        </Form>
+
+        {isCsv && result && (
+          <div style={{ marginTop: 12 }}>
+            <p style={{ color: result.ok ? "green" : "red", margin: 0 }}>{result.message}</p>
+            {"errors" in result && result.errors && result.errors.length > 0 && (
+              <ul style={{ color: "#c0392b", marginTop: 6 }}>
+                {result.errors.map((err) => (
+                  <li key={err}>{err}</li>
+                ))}
+              </ul>
+            )}
+          </div>
         )}
       </s-section>
 

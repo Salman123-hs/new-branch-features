@@ -29,3 +29,4 @@
 .pdc__result--success { color: #0a7d32; }
 .pdc__result--error   { color: #c0392b; }
 .pdc__result--loading { color: #666; }
+.pdc__result .pdc__no-cod { color: #c0392b; }

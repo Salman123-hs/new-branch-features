@@ -64,6 +64,9 @@
               "🚚 " + data.message,
               data.codAvailable ? "💵 Cash on Delivery available" : "Cash on Delivery not available",
             ]);
+            if (!data.codAvailable) {
+              result.lastElementChild.classList.add("pdc__no-cod");
+            }
           } else {
             show("error", [data.message]);
           }
