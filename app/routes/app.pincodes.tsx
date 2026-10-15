@@ -3,8 +3,30 @@ import { Form, useActionData, useLoaderData, useNavigation } from "react-router"
 import { authenticate } from "../shopify.server";
 import { connectDB } from "../mongo.server";
 import { Pincode } from "../models/pincode.server";
+import { isValidPostcode, normalizeCountry, normalizePostcode } from "../utils/postcode"; // naya
 
-type CsvRow = { pincode: string; minDays: number; maxDays: number; codAvailable: boolean };
+// Dropdown ke desh (code, naam) // naya
+const COUNTRIES = [
+  ["IN", "India"],
+  ["US", "United States"],
+  ["GB", "United Kingdom"],
+  ["CA", "Canada"],
+  ["AU", "Australia"],
+  ["DE", "Germany"],
+  ["FR", "France"],
+  ["NL", "Netherlands"],
+  ["JP", "Japan"],
+  ["AE", "United Arab Emirates"],
+  ["SG", "Singapore"],
+] as const;
+
+type CsvRow = {
+  country: string; // naya
+  pincode: string;
+  minDays: number;
+  maxDays: number;
+  codAvailable: boolean;
+};
 
 const MAX_ROWS = 50000;
 
@@ -20,13 +42,16 @@ function parseCsv(text: string) {
 
     const cells = line.split(",").map((c) => c.trim().replace(/^"|"$/g, ""));
 
-    // pehli line header ho (jaise "pincode,...") to skip
-    if (lineNo === 1 && !/^\d+$/.test(cells[0])) return;
+    // pehli line header ho to skip. Naam se pehchaan, kyunki UK jaise postcode letters se shuru hote hain // naya
+    if (lineNo === 1 && /pin|post|zip/i.test(cells[0])) return;
 
-    const [pin, min, max, cod] = cells;
+    const [rawPin, min, max, cod, rawCountry] = cells; // naya: 5th column country
 
-    if (!/^\d{6}$/.test(pin)) {
-      errors.push(`Row ${lineNo}: invalid pincode "${pin}"`);
+    const country = normalizeCountry(rawCountry); // naya (khaali ho to IN)
+    const pin = normalizePostcode(rawPin, country); // naya
+
+    if (!isValidPostcode(pin, country)) { // naya
+      errors.push(`Row ${lineNo}: invalid postal code "${rawPin}" for ${country}`);
       return;
     }
 
@@ -45,25 +70,30 @@ function parseCsv(text: string) {
     const codText = (cod || "yes").toLowerCase();
     const codAvailable = !["no", "false", "0", "n"].includes(codText);
 
-    rows.push({ pincode: pin, minDays, maxDays, codAvailable });
+    rows.push({ country, pincode: pin, minDays, maxDays, codAvailable });
   });
 
   return { rows, errors };
 }
 
-const CSV_EXAMPLE = `pincode,min_days,max_days,cod
-452001,2,4,yes
-110001,3,5,yes
-400001,4,7,no`;
+// naya: country column + UK/US example
+const CSV_EXAMPLE = `pincode,min_days,max_days,cod,country
+452001,2,4,yes,IN
+110001,3,5,yes,IN
+SW1A 1AA,5,8,no,GB
+90210,4,7,no,US`;
 
-// Page khulte hi: is store ke saare pincodes laao
+// Page khulte hi: is store ke saare postal codes laao
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
   await connectDB();
-  const docs = await Pincode.find({ shop: session.shop }).sort({ pincode: 1 }).lean();
+  const docs = await Pincode.find({ shop: session.shop })
+    .sort({ country: 1, pincode: 1 }) // naya: pehle desh, phir code
+    .lean();
   return {
     pincodes: docs.map((p) => ({
       id: String(p._id),
+      country: p.country, // naya
       pincode: p.pincode,
       minDays: p.minDays,
       maxDays: p.maxDays,
@@ -72,13 +102,13 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   };
 };
 
-// Form submit hone par: pincode add/update ya delete
+// Form submit hone par: add/update, CSV upload ya delete
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { session } = await authenticate.admin(request);
   await connectDB();
   const form = await request.formData();
 
-    // CSV bulk upload
+  // CSV bulk upload
   if (form.get("intent") === "csv") {
     const file = form.get("file");
 
@@ -98,10 +128,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       return { ok: false, source: "csv", message: "No valid rows found", errors: errors.slice(0, 10) };
     }
 
-    // ek-ek ki jagah 1000-1000 ke batch mein save (bahut tez)
+    // 1000-1000 ke batch mein save
     const ops = rows.map((r) => ({
       updateOne: {
-        filter: { shop: session.shop, pincode: r.pincode },
+        filter: { shop: session.shop, country: r.country, pincode: r.pincode }, // naya: country
         update: { $set: { minDays: r.minDays, maxDays: r.maxDays, codAvailable: r.codAvailable } },
         upsert: true,
       },
@@ -114,7 +144,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       ok: true,
       source: "csv",
       message:
-        `${rows.length} pincodes imported` +
+        `${rows.length} postal codes imported` +
         (errors.length ? `, ${errors.length} rows skipped` : ""),
       errors: errors.slice(0, 10),
     };
@@ -122,27 +152,29 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   if (form.get("intent") === "delete") {
     await Pincode.deleteOne({ _id: String(form.get("id")), shop: session.shop });
-    return { ok: true, message: "Pincode deleted" };
+    return { ok: true, message: "Postal code deleted" };
   }
 
-  const pincode = String(form.get("pincode") || "").trim();
+  // Ek-ek karke add / update
+  const country = normalizeCountry(form.get("country")); // naya
+  const pincode = normalizePostcode(form.get("pincode"), country); // naya
   const minDays = Number(form.get("minDays") || 3);
   const maxDays = Number(form.get("maxDays") || 5);
   const codAvailable = form.get("codAvailable") === "on";
 
-  if (!/^\d{6}$/.test(pincode)) {
-    return { ok: false, message: "Pincode must be 6 digits" };
+  if (!isValidPostcode(pincode, country)) { // naya
+    return { ok: false, message: `Please enter a valid postal code for ${country}` };
   }
   if (minDays > maxDays) {
     return { ok: false, message: "Min days cannot be greater than max days" };
   }
 
   await Pincode.findOneAndUpdate(
-    { shop: session.shop, pincode },
+    { shop: session.shop, country, pincode }, // naya: country
     { minDays, maxDays, codAvailable },
     { upsert: true },
   );
-  return { ok: true, message: `Pincode ${pincode} saved` };
+  return { ok: true, message: `${country} ${pincode} saved` };
 };
 
 export default function PincodesPage() {
@@ -154,11 +186,23 @@ export default function PincodesPage() {
 
   return (
     <s-page heading="Pincodes">
-      <s-section heading="Add new pincode">
+      <s-section heading="Add new postal code">
         <Form method="post" style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "end" }}>
+          {/* naya: country dropdown */}
           <label>
-            Pincode<br />
-            <input name="pincode" placeholder="452001" maxLength={6} required />
+            Country<br />
+            <select name="country" defaultValue="IN">
+              {COUNTRIES.map(([code, name]) => (
+                <option key={code} value={code}>
+                  {name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Postal code<br />
+            {/* naya: letters bhi chalenge, max 10 */}
+            <input name="pincode" placeholder="452001 / SW1A 1AA" maxLength={10} required />
           </label>
           <label>
             Min days<br />
@@ -175,14 +219,15 @@ export default function PincodesPage() {
             {saving ? "Saving..." : "Save"}
           </button>
         </Form>
-                {result && !isCsv && (
+        {result && !isCsv && (
           <p style={{ color: result.ok ? "green" : "red", marginTop: 12 }}>{result.message}</p>
         )}
       </s-section>
 
-            <s-section heading="Bulk upload (CSV)">
+      <s-section heading="Bulk upload (CSV)">
         <p style={{ marginTop: 0 }}>
-          Columns: <b>pincode, min_days, max_days, cod</b>. Existing pincodes will be updated.
+          Columns: <b>pincode, min_days, max_days, cod, country</b>. Country is optional (default
+          IN). Existing codes will be updated.
         </p>
         <pre style={{ background: "#f6f6f7", padding: 10, borderRadius: 6, fontSize: 13 }}>
           {CSV_EXAMPLE}
@@ -214,14 +259,15 @@ export default function PincodesPage() {
         )}
       </s-section>
 
-      <s-section heading={`Saved pincodes (${pincodes.length})`}>
+      <s-section heading={`Saved postal codes (${pincodes.length})`}>
         {pincodes.length === 0 ? (
-          <p>No pincodes added yet.</p>
+          <p>No postal codes added yet.</p>
         ) : (
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead>
               <tr style={{ textAlign: "left" }}>
-                <th>Pincode</th>
+                <th>Country</th>{/* naya */}
+                <th>Postal code</th>
                 <th>Delivery</th>
                 <th>COD</th>
                 <th></th>
@@ -230,6 +276,7 @@ export default function PincodesPage() {
             <tbody>
               {pincodes.map((p) => (
                 <tr key={p.id} style={{ borderTop: "1px solid #eee" }}>
+                  <td>{p.country}</td>{/* naya */}
                   <td>{p.pincode}</td>
                   <td>{p.minDays}–{p.maxDays} days</td>
                   <td>{p.codAvailable ? "Yes" : "No"}</td>
