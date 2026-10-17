@@ -1,6 +1,5 @@
 (function () {
   var root = (window.Shopify && Shopify.routes && Shopify.routes.root) || "/";
-  var STORAGE_KEY = "pdc_last_pincode";
 
   function init(box) {
     if (box.dataset.pdcReady) return;
@@ -11,9 +10,14 @@
     var button = box.querySelector(".pdc__button");
     var result = box.querySelector(".pdc__result");
 
-    // sirf number, max 6
+    // naya: desh Liquid se aata hai (data-country)
+    var country = (box.dataset.country || "IN").toUpperCase();
+    // naya: har desh ka last code alag yaad rahe
+    var STORAGE_KEY = "pdc_last_postcode_" + country;
+
+    // naya: letters, number, space, dash chalenge; capital mein; max 10
     input.addEventListener("input", function () {
-      input.value = input.value.replace(/\D/g, "").slice(0, 6);
+      input.value = input.value.toUpperCase().replace(/[^A-Z0-9 -]/g, "").slice(0, 10);
     });
 
     form.addEventListener("submit", function (e) {
@@ -21,7 +25,7 @@
       check(input.value.trim());
     });
 
-    // pichhla pincode yaad rakho
+    // pichhla code yaad rakho
     try {
       var saved = localStorage.getItem(STORAGE_KEY);
       if (saved) {
@@ -29,6 +33,13 @@
         check(saved);
       }
     } catch (err) {}
+
+    // naya: browser mein jaldi wala basic check (asli check server par hota hai)
+    function looksValid(code) {
+      var clean = code.replace(/[\s-]/g, "");
+      if (country === "IN") return /^\d{6}$/.test(clean);
+      return /^[A-Z0-9]{3,10}$/.test(clean);
+    }
 
     function show(type, lines) {
       result.className = "pdc__result pdc__result--" + type;
@@ -40,24 +51,29 @@
       });
     }
 
-    function check(pincode) {
-      if (!/^\d{6}$/.test(pincode)) {
-        show("error", ["Please enter a valid 6-digit pincode"]);
+    function check(code) {
+      if (!looksValid(code)) {
+        show("error", [
+          country === "IN" ? "Please enter a valid 6-digit pincode" : "Please enter a valid postal code",
+        ]);
         return;
       }
       button.disabled = true;
       show("loading", ["Checking..."]);
 
-      fetch(root + "apps/pincode/check?pincode=" + encodeURIComponent(pincode), {
-        headers: { Accept: "application/json" },
-      })
+      fetch(
+        root +
+          "apps/pincode/check?pincode=" + encodeURIComponent(code) +
+          "&country=" + encodeURIComponent(country), // naya
+        { headers: { Accept: "application/json" } }
+      )
         .then(function (res) { return res.json(); })
         .then(function (data) {
           if (!data.ok) {
             show("error", [data.message || "Something went wrong"]);
             return;
           }
-          try { localStorage.setItem(STORAGE_KEY, pincode); } catch (err) {}
+          try { localStorage.setItem(STORAGE_KEY, code); } catch (err) {}
 
           if (data.available) {
             show("success", [

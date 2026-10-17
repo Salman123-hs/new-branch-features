@@ -1,4 +1,18 @@
-<div class="pdc" data-pincode-checker>
+{%- comment -%} naya: customer ka desh, Shopify Markets se {%- endcomment -%}
+{%- assign pdc_country = localization.country.iso_code | default: 'IN' -%}
+
+{%- comment -%} naya: merchant ne placeholder khaali chhoda ho to desh ke hisaab se {%- endcomment -%}
+{%- if block.settings.placeholder != blank -%}
+  {%- assign pdc_placeholder = block.settings.placeholder -%}
+{%- elsif pdc_country == 'IN' -%}
+  {%- assign pdc_placeholder = 'Enter pincode' -%}
+{%- elsif pdc_country == 'US' -%}
+  {%- assign pdc_placeholder = 'Enter ZIP code' -%}
+{%- else -%}
+  {%- assign pdc_placeholder = 'Enter postcode' -%}
+{%- endif -%}
+
+<div class="pdc" data-pincode-checker data-country="{{ pdc_country }}">
   {% if block.settings.heading != blank %}
     <p class="pdc__heading">{{ block.settings.heading }}</p>
   {% endif %}
@@ -7,11 +21,11 @@
     <input
       class="pdc__input"
       type="text"
-      inputmode="numeric"
-      maxlength="6"
+      {% if pdc_country == 'IN' or pdc_country == 'US' %}inputmode="numeric"{% endif %}
+      maxlength="10"
       autocomplete="postal-code"
-      placeholder="{{ block.settings.placeholder }}"
-      aria-label="{{ block.settings.placeholder }}"
+      placeholder="{{ pdc_placeholder }}"
+      aria-label="{{ pdc_placeholder }}"
     >
     <button
       class="pdc__button"
@@ -34,7 +48,12 @@
   "enabled_on": { "templates": ["product"] },
   "settings": [
     { "type": "text", "id": "heading", "label": "Heading", "default": "Check delivery" },
-    { "type": "text", "id": "placeholder", "label": "Input placeholder", "default": "Enter pincode" },
+    {
+      "type": "text",
+      "id": "placeholder",
+      "label": "Input placeholder",
+      "info": "Leave empty to show Pincode / ZIP code / Postcode automatically by country"
+    },
     { "type": "text", "id": "button_text", "label": "Button text", "default": "Check" },
     { "type": "color", "id": "button_color", "label": "Button color", "default": "#000000" }
   ]
