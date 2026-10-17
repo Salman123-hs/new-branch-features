@@ -3,6 +3,7 @@ import { authenticate } from "../shopify.server";
 import { connectDB } from "../mongo.server";
 import { Pincode } from "../models/pincode.server";
 import { isValidPostcode, normalizeCountry, normalizePostcode } from "../utils/postcode";
+import { recordCheck } from "../models/stats.server";
 
 // aaj se X din baad ki date, jaise "13 Oct"
 function dateAfter(days: number) {
@@ -18,20 +19,21 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   const url = new URL(request.url);
   const shop = url.searchParams.get("shop"); // Shopify khud add karta hai
-  const country = normalizeCountry(url.searchParams.get("country")); // naya
-  const pincode = normalizePostcode(url.searchParams.get("pincode"), country); // naya
+  const country = normalizeCountry(url.searchParams.get("country"));
+  const pincode = normalizePostcode(url.searchParams.get("pincode"), country);
 
   if (!shop) {
     return Response.json({ ok: false, message: "Shop not found" }, { status: 400 });
   }
-  if (!isValidPostcode(pincode, country)) { // naya
+  if (!isValidPostcode(pincode, country)) {
     return Response.json({ ok: false, message: "Please enter a valid postal code" });
   }
 
   await connectDB();
-  const doc = await Pincode.findOne({ shop, country, pincode }).lean(); // country joda
+  const doc = await Pincode.findOne({ shop, country, pincode }).lean();
 
   if (!doc) {
+    recordCheck(shop, false); // naya: "not deliverable" check gino
     return Response.json({
       ok: true,
       available: false,
@@ -41,6 +43,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     });
   }
 
+  recordCheck(shop, true); // naya: successful check gino
   const from = dateAfter(doc.minDays);
   const to = dateAfter(doc.maxDays);
 

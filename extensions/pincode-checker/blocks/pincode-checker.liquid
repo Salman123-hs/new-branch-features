@@ -1,7 +1,9 @@
-{%- comment -%} naya: customer ka desh, Shopify Markets se {%- endcomment -%}
+{{ 'pincode-checker.css' | asset_url | stylesheet_tag }}
+<script src="{{ 'pincode-checker.js' | asset_url }}" defer></script>
+{%- comment -%} customer ka desh, Shopify Markets se {%- endcomment -%}
 {%- assign pdc_country = localization.country.iso_code | default: 'IN' -%}
 
-{%- comment -%} naya: merchant ne placeholder khaali chhoda ho to desh ke hisaab se {%- endcomment -%}
+{%- comment -%} merchant ne placeholder khaali chhoda ho to desh ke hisaab se {%- endcomment -%}
 {%- if block.settings.placeholder != blank -%}
   {%- assign pdc_placeholder = block.settings.placeholder -%}
 {%- elsif pdc_country == 'IN' -%}
@@ -43,8 +45,6 @@
 {
   "name": "Pincode checker",
   "target": "section",
-  "javascript": "pincode-checker.js",
-  "stylesheet": "pincode-checker.css",
   "enabled_on": { "templates": ["product"] },
   "settings": [
     { "type": "text", "id": "heading", "label": "Heading", "default": "Check delivery" },
