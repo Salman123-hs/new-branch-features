@@ -1,11 +1,19 @@
 import { useEffect, useRef, useState } from "react";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
-import { useActionData, useLoaderData, useNavigation, useSearchParams, useSubmit } from "react-router";
+import {
+  useActionData,
+  useLoaderData,
+  useNavigate,
+  useNavigation,
+  useSearchParams,
+  useSubmit,
+} from "react-router";
 import { useAppBridge } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
 import { connectDB } from "../mongo.server";
 import { Pincode } from "../models/pincode.server";
 import { isValidPostcode, normalizeCountry, normalizePostcode } from "../utils/postcode";
+import { countryAllowed, getShopPlan, usedCountries } from "../limits.server";
 
 const COUNTRIES = [
   ["IN", "India"],
@@ -119,7 +127,15 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const allCod = groups.reduce((sum: number, g: any) => sum + g.cod, 0);
   const fastest = groups.length ? Math.min(...groups.map((g: any) => g.fastest)) : null;
 
+  // 🔒 Plan info (limits + features)
+  const plan = await getShopPlan(shop);
+
   return {
+    planInfo: {
+      name: plan.name,
+      pincodeLimit: plan.limits.pincodes,
+      canExport: plan.features.export,
+    },
     pincodes: docs.map((p) => ({
       id: String(p._id),
       country: p.country,
@@ -166,7 +182,60 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       return { ok: false, source: "csv", message: "No valid rows found", errors: errors.slice(0, 10) };
     }
 
-    const ops = rows.map((r) => ({
+    // 🔒 Plan limits: country + postal code count
+    const plan = await getShopPlan(session.shop);
+    let importRows = rows;
+    let skippedCountry = 0;
+    let skippedLimit = 0;
+
+    // 1) Countries (Free = 1)
+    const countryLimit = plan.limits.countries;
+    if (countryLimit !== null) {
+      const allowed = new Set(await usedCountries(session.shop));
+      importRows = importRows.filter((r) => {
+        if (allowed.has(r.country)) return true;
+        if (allowed.size < countryLimit) {
+          allowed.add(r.country);
+          return true;
+        }
+        skippedCountry++;
+        return false;
+      });
+    }
+
+    // 2) Postal codes (Free = 100). Purane codes update hote rahenge, naye sirf jagah tak
+    const pinLimit = plan.limits.pincodes;
+    if (pinLimit !== null) {
+      const existingDocs: any[] = await Pincode.find(
+        { shop: session.shop, pincode: { $in: importRows.map((r) => r.pincode) } },
+        { country: 1, pincode: 1 },
+      ).lean();
+      const existing = new Set(existingDocs.map((d) => `${d.country}:${d.pincode}`));
+      let room = Math.max(0, pinLimit - (await Pincode.countDocuments({ shop: session.shop })));
+      const added = new Set<string>();
+      importRows = importRows.filter((r) => {
+        const key = `${r.country}:${r.pincode}`;
+        if (existing.has(key) || added.has(key)) return true;
+        if (room > 0) {
+          room--;
+          added.add(key);
+          return true;
+        }
+        skippedLimit++;
+        return false;
+      });
+    }
+
+    if (importRows.length === 0) {
+      return {
+        ok: false,
+        source: "csv",
+        message: `Your ${plan.name} plan limit is reached. Upgrade to Pro to import more postal codes.`,
+        errors: errors.slice(0, 10),
+      };
+    }
+
+    const ops = importRows.map((r) => ({
       updateOne: {
         filter: { shop: session.shop, country: r.country, pincode: r.pincode },
         update: { $set: { minDays: r.minDays, maxDays: r.maxDays, codAvailable: r.codAvailable } },
@@ -180,8 +249,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     return {
       ok: true,
       source: "csv",
-      message: `${rows.length} postal codes imported` + (errors.length ? `, ${errors.length} rows skipped` : ""),
+      message: `${importRows.length} postal codes imported` + (errors.length ? `, ${errors.length} rows skipped` : ""),
       errors: errors.slice(0, 10),
+      limitSkipped: skippedLimit + skippedCountry,
+      skippedCountry,
+      skippedLimit,
+      planName: plan.name,
     };
   }
 
@@ -206,6 +279,29 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     return { ok: false, source: "add", message: "Min days cannot be greater than max days" };
   }
 
+  // 🔒 Plan limits (sirf naye code pe; purana edit hamesha chalega)
+  const plan = await getShopPlan(session.shop);
+  const exists = await Pincode.exists({ shop: session.shop, country, pincode });
+  if (!exists) {
+    if (!(await countryAllowed(session.shop, country, plan))) {
+      return {
+        ok: false,
+        source: "add",
+        message: `The ${plan.name} plan supports 1 country. Upgrade to Pro to add more countries.`,
+      };
+    }
+    if (plan.limits.pincodes !== null) {
+      const count = await Pincode.countDocuments({ shop: session.shop });
+      if (count >= plan.limits.pincodes) {
+        return {
+          ok: false,
+          source: "add",
+          message: `The ${plan.name} plan includes ${plan.limits.pincodes} postal codes. Upgrade to Pro for unlimited.`,
+        };
+      }
+    }
+  }
+
   await Pincode.findOneAndUpdate({ shop: session.shop, country, pincode }, { minDays, maxDays, codAvailable }, { upsert: true });
   return { ok: true, source: "add", message: `${country} ${pincode} saved` };
 };
@@ -228,7 +324,8 @@ function StatCard({ icon, label, value }: { icon: string; label: string; value: 
 }
 
 export default function PincodesPage() {
-  const { pincodes, total, page, q, country, summary } = useLoaderData<typeof loader>();
+  const { pincodes, total, page, q, country, summary, planInfo } = useLoaderData<typeof loader>();
+  const navigate = useNavigate();
   const result = useActionData<typeof action>();
   const nav = useNavigation();
   const submit = useSubmit();
@@ -352,18 +449,64 @@ export default function PincodesPage() {
   const to = Math.min(page * PAGE_SIZE, total);
   const isEmptyStore = summary.allTotal === 0;
 
+  // 🔒 Plan limit
+  const pinLimit = planInfo.pincodeLimit;
+  const atLimit = pinLimit !== null && summary.allTotal >= pinLimit;
+  const nearLimit = pinLimit !== null && !atLimit && summary.allTotal >= pinLimit * 0.8;
+  const csvSkipped = (csvResult as any)?.ok ? ((csvResult as any).limitSkipped ?? 0) : 0;
+
   return (
     <s-page heading="Postal codes">
       {/* ---------- Page header buttons ---------- */}
-      <s-button slot="primary-action" variant="primary" commandFor="pc-edit-modal" command="--show" onClick={openAdd}>
-        Add postal code
-      </s-button>
+      {atLimit ? (
+        <s-button slot="primary-action" variant="primary" onClick={() => navigate("/app/pricing")}>
+          ⭐ Upgrade for more codes
+        </s-button>
+      ) : (
+        <s-button slot="primary-action" variant="primary" commandFor="pc-edit-modal" command="--show" onClick={openAdd}>
+          Add postal code
+        </s-button>
+      )}
       <s-button slot="secondary-actions" commandFor="pc-import-modal" command="--show">
         Import CSV
       </s-button>
-      <s-button slot="secondary-actions" onClick={exportCsv} loading={exporting} disabled={isEmptyStore}>
-        Export CSV
-      </s-button>
+      {planInfo.canExport ? (
+        <s-button slot="secondary-actions" onClick={exportCsv} loading={exporting} disabled={isEmptyStore}>
+          Export CSV
+        </s-button>
+      ) : (
+        <s-button slot="secondary-actions" onClick={() => navigate("/app/pricing")}>
+          Export CSV ⭐ Pro
+        </s-button>
+      )}
+
+      {/* 🔒 Plan limit banners */}
+      {(atLimit || nearLimit) && (
+        <s-banner
+          tone={atLimit ? "critical" : "warning"}
+          heading={`You've used ${summary.allTotal} of ${pinLimit} postal codes on the ${planInfo.name} plan`}
+        >
+          {atLimit
+            ? "New postal codes can't be added. Existing codes keep working. Upgrade to Pro for unlimited codes, zones and countries."
+            : "You're close to your limit. Upgrade to Pro for unlimited codes, zones and countries."}
+          <s-button slot="secondary-actions" onClick={() => navigate("/app/pricing")}>
+            See plans
+          </s-button>
+        </s-banner>
+      )}
+
+      {csvSkipped > 0 && (
+        <s-banner tone="warning" heading={`${csvSkipped} rows were not imported because of your plan limit`}>
+          {(csvResult as any).skippedLimit > 0 &&
+            `${(csvResult as any).skippedLimit} new postal codes are over the ${(csvResult as any).planName} plan limit. `}
+          {(csvResult as any).skippedCountry > 0 &&
+            `${(csvResult as any).skippedCountry} rows are from another country (Free plan supports 1 country). `}
+          Upgrade to Pro to import everything.
+          <s-button slot="secondary-actions" onClick={() => navigate("/app/pricing")}>
+            See plans
+          </s-button>
+        </s-banner>
+      )}
 
       {/* CSV mein kuch rows chhoot gayi hon to page par dikhao */}
       {csvResult?.ok && csvErrors.length > 0 && (

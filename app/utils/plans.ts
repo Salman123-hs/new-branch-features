@@ -25,7 +25,7 @@ export type Plan = {
   features: {
     countdown: boolean;
     export: boolean;
-    design: boolean;
+    design: boolean; // true = full design control (Free ko basic styles hamesha milte hain)
     removeBadge: boolean;
     analytics: false | "Basic" | "Full";
     prioritySupport: boolean;
@@ -48,6 +48,7 @@ export const PLANS: Record<PlanKey, Plan> = {
       "1,000 checks / month",
       "Delivery dates & COD status",
       "Holidays, cut-off & working days",
+      "5 widget styles + your button color",
     ],
     limits: { pincodes: 100, zones: 2, checks: 1000, countries: 1 },
     features: {
@@ -74,7 +75,7 @@ export const PLANS: Record<PlanKey, Plan> = {
       "20,000 checks / month",
       "⏰ Live cut-off countdown",
       "All countries",
-      "Widget design options",
+      "Full design control (colors, corners, shadow)",
       "CSV export",
       'Remove "Powered by" badge',
       "Basic analytics",

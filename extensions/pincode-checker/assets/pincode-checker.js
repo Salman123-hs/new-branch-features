@@ -20,6 +20,12 @@
     var country = (box.dataset.country || "IN").toUpperCase();
     var STORAGE_KEY = "pdc_last_postcode_" + country;
     var timer = null; // naya: countdown ka interval
+    var noIcons = box.classList.contains("pdc--no-icons"); // Design page: icons band
+
+    // "🚚 Estimated…" → "Estimated…" jab icons band hon
+    function clean(text) {
+      return noIcons ? String(text).replace(/^(🚚|💵|❌|⏰|🚫|⚡)\uFE0F?\s*/u, "") : text;
+    }
 
     input.addEventListener("input", function () {
       input.value = input.value.toUpperCase().replace(/[^A-Z0-9 -]/g, "").slice(0, 10);
@@ -61,10 +67,16 @@
     // Ek line jodo (textContent = safe, koi HTML inject nahi ho sakta)
     function line(text, cls) {
       var p = document.createElement("p");
-      p.textContent = text;
+      p.textContent = clean(text);
       if (cls) p.className = cls;
       result.appendChild(p);
       return p;
+    }
+
+    // Free plan: chhota "Powered by" badge (Pro/Plus mein nahi dikhta)
+    function poweredBy(data) {
+      if (!data || !data.poweredBy) return;
+      line("⚡ Powered by Pincode Checker", "pdc__powered");
     }
 
     // naya: live countdown; cut-off nikalte hi dobara check karke nayi date lao
@@ -78,7 +90,7 @@
           check(code, true);
           return;
         }
-        el.textContent = "⏰ Order within " + fmt(left) + " " + suffix;
+        el.textContent = clean("⏰ Order within " + fmt(left) + " " + suffix);
       }
       tick();
       timer = setInterval(tick, 30000);
@@ -115,7 +127,7 @@
             reset("success");
             line("🚚 " + data.message);
             line(
-              data.codAvailable ? "💵 Cash on Delivery available" : "Cash on Delivery not available",
+              data.codAvailable ? "💵 Cash on Delivery available" : "❌ Cash on Delivery not available",
               data.codAvailable ? "" : "pdc__no-cod"
             );
             if (typeof data.cutoffMinutesLeft === "number" && data.cutoffMinutesLeft > 0) {
@@ -126,9 +138,11 @@
               );
             }
             if (data.disclaimer) line(data.disclaimer, "pdc__note");
+            poweredBy(data);
           } else {
             reset("error");
-            line(data.message);
+            line("🚫 " + data.message);
+            poweredBy(data);
           }
         })
         .catch(function () {

@@ -1,68 +1,121 @@
-/* ---------- Box ---------- */
+/* Pincode Checker widget
+   Rang aur shape app ke Design page se CSS variables mein aate hain (liquid). */
 .pdc {
+  --pdc-accent: #000000;
+  --pdc-btn-text: #ffffff;
+  --pdc-bg: transparent;
+  --pdc-text: inherit;
+  --pdc-success: #0a7d32;
+  --pdc-error: #c0392b;
+  --pdc-radius: 8px;
+
   margin: 16px 0;
   padding: 16px;
+  background: var(--pdc-bg);
+  color: var(--pdc-text);
+  border-radius: var(--pdc-radius);
   border: 1px solid rgba(0, 0, 0, 0.12);
-  border-radius: 8px;
+  font-size: 14px;
+  box-sizing: border-box;
+  transition: box-shadow 0.2s ease;
 }
 
+/* Border */
+.pdc--border-none { border-color: transparent; }
+.pdc--border-strong { border: 2px solid var(--pdc-accent); }
+.pdc--dark.pdc--border-subtle { border-color: rgba(255, 255, 255, 0.14); }
+
+/* Shadow */
+.pdc--shadow { box-shadow: 0 10px 28px rgba(0, 0, 0, 0.14); }
+
+/* Heading */
 .pdc__heading {
   margin: 0 0 10px;
-  font-weight: 600;
+  font-weight: 700;
+  font-size: 15px;
+  color: inherit;
 }
 
-/* ---------- Input + button ---------- */
+/* Form */
 .pdc__form {
   display: flex;
   gap: 8px;
+  margin: 0;
 }
+.pdc--stacked .pdc__form { flex-direction: column; }
 
 .pdc__input {
   flex: 1;
   min-width: 0;
   padding: 10px 12px;
-  border: 1px solid rgba(0, 0, 0, 0.25);
-  border-radius: 6px;
   font-size: 15px;
+  font-family: inherit;
+  color: inherit;
+  background: #ffffff;
+  border: 1px solid #c9c9c9;
+  border-radius: var(--pdc-radius);
+  box-sizing: border-box;
 }
+.pdc__input:focus {
+  outline: none;
+  border-color: var(--pdc-accent);
+  box-shadow: 0 0 0 3px rgba(0, 91, 211, 0.15);
+}
+.pdc--dark .pdc__input {
+  background: #2a2a2a;
+  border-color: #555555;
+}
+.pdc--dark .pdc__input::placeholder { color: #9a9a9a; }
 
 .pdc__button {
   padding: 10px 18px;
   border: 0;
-  border-radius: 6px;
-  color: #fff;
-  font-weight: 600;
+  border-radius: var(--pdc-radius);
+  background: var(--pdc-accent);
+  color: var(--pdc-btn-text);
+  font-family: inherit;
+  font-size: 15px;
+  font-weight: 700;
   cursor: pointer;
+  white-space: nowrap;
+  transition: opacity 0.15s ease;
 }
+.pdc__button:hover { opacity: 0.9; }
+.pdc__button:disabled { opacity: 0.6; cursor: wait; }
 
-.pdc__button:disabled {
-  opacity: 0.6;
-  cursor: wait;
-}
-
-/* ---------- Result ---------- */
-.pdc__result:empty {
-  display: none;
-}
-
+/* Result */
 .pdc__result {
   margin-top: 10px;
   font-size: 14px;
+  line-height: 1.5;
 }
+.pdc__result:empty { display: none; }
+.pdc__result p { margin: 4px 0; }
 
-.pdc__result p {
-  margin: 4px 0;
+.pdc__result--success { color: var(--pdc-success); }
+.pdc__result--error { color: var(--pdc-error); }
+.pdc__result--loading { color: #666666; }
+.pdc--dark .pdc__result--loading { color: #aaaaaa; }
+
+.pdc__result .pdc__no-cod { color: var(--pdc-error); }
+
+.pdc__result .pdc__countdown {
+  color: #b25e09;
+  font-weight: 600;
 }
+.pdc--dark .pdc__result .pdc__countdown { color: #ffb366; }
 
-.pdc__result--success { color: #0a7d32; } /* hara: delivery available */
-.pdc__result--error   { color: #c0392b; } /* laal: galat code ya delivery nahi */
-.pdc__result--loading { color: #666; }    /* grey: "Checking..." */
+.pdc__result .pdc__note {
+  color: #8a8a8a;
+  font-size: 12px;
+  margin-top: 8px;
+}
+.pdc--dark .pdc__result .pdc__note { color: #a0a0a0; }
 
-/* COD nahi hai to laal */
-.pdc__result .pdc__no-cod { color: #c0392b; }
-
-/* naya: countdown (naarangi, bold) */
-.pdc__result .pdc__countdown { color: #b25e09; font-weight: 600; }
-
-/* naya: merchant ka note (halka grey, chhota) */
-.pdc__result .pdc__note { color: #8a8a8a; font-size: 12px; margin-top: 8px; }
+/* Free plan badge */
+.pdc__result .pdc__powered {
+  color: #b5b5b5;
+  font-size: 11px;
+  margin-top: 10px;
+  text-align: right;
+}

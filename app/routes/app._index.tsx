@@ -6,6 +6,11 @@ import { connectDB } from "../mongo.server";
 import { Pincode } from "../models/pincode.server";
 import { Settings } from "../models/settings.server";
 import { Stats } from "../models/stats.server";
+import { Zone } from "../models/zone.server";
+import { getMonthlyChecks } from "../models/usage.server";
+import { getCurrentPlan } from "../billing.server";
+import { syncDesignAccess } from "../design.server";
+import { PLANS, fmtLimit } from "../utils/plans";
 
 // Store ki themes + har theme ki product template (widget laga hai ya nahi dekhne ke liye)
 const THEMES_QUERY = `#graphql
@@ -49,17 +54,23 @@ function dayLabel(daysFromToday: number) {
 }
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { admin, session } = await authenticate.admin(request);
+  const { admin, billing, session } = await authenticate.admin(request);
   await connectDB();
   const shop = session.shop;
 
-  const [total, countries, codCount, settingsSaved, stats] = await Promise.all([
+  const [total, countries, codCount, settingsSaved, stats, zoneCount, monthChecks, current] = await Promise.all([
     Pincode.countDocuments({ shop }),
     Pincode.distinct("country", { shop }),
     Pincode.countDocuments({ shop, codAvailable: true }),
     Settings.exists({ shop }),
     Stats.findOne({ shop }).lean(),
+    Zone.countDocuments({ shop }),
+    getMonthlyChecks(shop),
+    getCurrentPlan(billing, shop), // Shopify se plan sync bhi ho jata hai
   ]);
+  const plan = PLANS[current.key];
+  // Plan badla ho to widget design on/off (Free = Classic look)
+  await syncDesignAccess(admin, plan.features.design).catch(() => {});
 
   // Themes: permission na ho ya error aaye to null (page phir bhi chalega)
   let themes: ThemeInfo[] | null = null;
@@ -96,6 +107,15 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     themes,
     previewFrom: dayLabel(2),
     previewTo: dayLabel(4),
+    plan: {
+      key: plan.key,
+      name: plan.name,
+      emoji: plan.emoji,
+      interval: current.interval,
+      limits: plan.limits,
+    },
+    usage: { pincodes: total, zones: zoneCount, checks: monthChecks },
+    monthName: new Date().toLocaleDateString("en-US", { month: "long" }),
   };
 };
 
@@ -112,6 +132,42 @@ function StatCard({ icon, label, value, hint }: { icon: string; label: string; v
     </s-box>
   );
 }
+
+// Usage progress bar (limit ke paas naarangi, limit pe laal)
+function UsageBar({ label, used, limit }: { label: string; used: number; limit: number | null }) {
+  const unlimited = limit === null;
+  const pct = unlimited ? 100 : Math.min(100, Math.round((used / Math.max(limit, 1)) * 100));
+  const color = unlimited ? "#008060" : pct >= 100 ? "#c0392b" : pct >= 80 ? "#b25e09" : "#008060";
+  return (
+    <s-stack direction="block" gap="small-100">
+      <s-stack direction="inline" justifyContent="space-between">
+        <s-text>{label}</s-text>
+        <s-text color="subdued">
+          {used.toLocaleString("en-US")} / {fmtLimit(limit)}
+        </s-text>
+      </s-stack>
+      <div style={{ height: 8, background: "#ebebeb", borderRadius: 999, overflow: "hidden" }}>
+        <div
+          style={{
+            width: `${pct}%`,
+            height: "100%",
+            background: color,
+            opacity: unlimited ? 0.35 : 1,
+            borderRadius: 999,
+            transition: "width .4s ease",
+          }}
+        />
+      </div>
+    </s-stack>
+  );
+}
+
+const PRO_PERKS = [
+  "⏰ Live cut-off countdown",
+  "♾️ Unlimited postcodes, zones & countries",
+  "📊 20,000 checks / month",
+  "✨ Remove \"Powered by\" badge",
+];
 
 // Product page widget ka chhota preview (sirf dikhane ke liye)
 function WidgetPreview({ from, to }: { from: string; to: string }) {
@@ -187,6 +243,12 @@ export default function Index() {
   const allDone = doneCount === steps.length;
   const percent = Math.round((doneCount / steps.length) * 100);
 
+  // 🔒 Plan usage
+  const isFree = d.plan.key === "free";
+  const checkLimit = d.plan.limits.checks;
+  const checksOver = checkLimit !== null && d.usage.checks >= checkLimit;
+  const checksNear = checkLimit !== null && !checksOver && d.usage.checks >= checkLimit * 0.8;
+
   return (
     <s-page heading="Pincode & Delivery Checker">
       {/* ---------- Hero ---------- */}
@@ -221,6 +283,83 @@ export default function Index() {
             <s-text color="subdued">What customers see</s-text>
             <WidgetPreview from={d.previewFrom} to={d.previewTo} />
           </s-stack>
+        </s-grid>
+      </s-section>
+
+      {/* ---------- Checks limit banner ---------- */}
+      {(checksOver || checksNear) && (
+        <s-banner
+          tone={checksOver ? "critical" : "warning"}
+          heading={
+            checksOver
+              ? `You've used all ${checkLimit?.toLocaleString("en-US")} checks for ${d.monthName}`
+              : `You've used ${d.usage.checks.toLocaleString("en-US")} of ${checkLimit?.toLocaleString("en-US")} checks this month`
+          }
+        >
+          Don't worry, your widget keeps working for shoppers. Upgrade to get more checks every month.
+          <s-button slot="secondary-actions" href="/app/pricing">
+            See plans
+          </s-button>
+        </s-banner>
+      )}
+
+      {/* ---------- Plan & usage ---------- */}
+      <s-section>
+        <s-grid gridTemplateColumns="repeat(auto-fit, minmax(280px, 1fr))" gap="large">
+          <s-stack direction="block" gap="base">
+            <s-stack direction="inline" gap="small" alignItems="center" justifyContent="space-between">
+              <s-heading>Your plan</s-heading>
+              <s-badge tone={isFree ? "neutral" : "success"}>
+                {d.plan.emoji} {d.plan.name}
+                {!isFree ? ` · ${d.plan.interval}` : ""}
+              </s-badge>
+            </s-stack>
+            <UsageBar label={`Checks in ${d.monthName}`} used={d.usage.checks} limit={d.plan.limits.checks} />
+            <UsageBar label="Postal codes" used={d.usage.pincodes} limit={d.plan.limits.pincodes} />
+            <UsageBar label="Zones" used={d.usage.zones} limit={d.plan.limits.zones} />
+            <s-stack direction="inline" gap="base">
+              <s-button href="/app/pricing">{isFree ? "Compare plans" : "Manage plan"}</s-button>
+            </s-stack>
+          </s-stack>
+
+          {isFree ? (
+            <div
+              style={{
+                borderRadius: 16,
+                padding: 20,
+                background: "linear-gradient(135deg, #005bd3 0%, #3d8bfd 100%)",
+                color: "#fff",
+                display: "flex",
+                flexDirection: "column",
+                gap: 12,
+              }}
+            >
+              <div style={{ fontSize: 13, fontWeight: 700, opacity: 0.85, letterSpacing: 0.4 }}>
+                🚀 UPGRADE TO PRO
+              </div>
+              <div style={{ fontSize: 22, fontWeight: 700, lineHeight: "28px" }}>
+                Turn "maybe later" into "buy now"
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 14 }}>
+                {PRO_PERKS.map((perk) => (
+                  <div key={perk}>{perk}</div>
+                ))}
+              </div>
+              <div>
+                <s-button href="/app/pricing">Start free trial · $4.99/mo after</s-button>
+              </div>
+            </div>
+          ) : (
+            <s-box padding="base" background="subdued" borderRadius="large">
+              <s-stack direction="block" gap="small-200">
+                <s-text type="strong">⭐ Thanks for being a {d.plan.name} member!</s-text>
+                <s-text color="subdued">
+                  Countdown, unlimited postcodes and zones are unlocked. The "Powered by" badge is hidden
+                  on your store.
+                </s-text>
+              </s-stack>
+            </s-box>
+          )}
         </s-grid>
       </s-section>
 

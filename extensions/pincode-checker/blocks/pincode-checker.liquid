@@ -14,7 +14,41 @@
   {%- assign pdc_placeholder = 'Enter postcode' -%}
 {%- endif -%}
 
-<div class="pdc" data-pincode-checker data-country="{{ pdc_country }}">
+{%- comment -%}
+  App ke Design page se publish kiya gaya design (app metafield).
+  "active" = jo store pe dikhna chahiye (Free = basic, Pro = poora).
+  Publish nahi hua to theme editor ka button color use hota hai.
+{%- endcomment -%}
+{%- assign pdc_design = app.metafields.pdc.design.value.active -%}
+{%- assign pdc_classes = 'pdc' -%}
+
+{%- if pdc_design -%}
+  {%- capture pdc_style -%}
+    --pdc-accent: {{ pdc_design.accent | escape }};
+    --pdc-btn-text: {{ pdc_design.buttonText | escape }};
+    --pdc-bg: {{ pdc_design.background | escape }};
+    --pdc-text: {{ pdc_design.text | escape }};
+    --pdc-success: {{ pdc_design.success | escape }};
+    --pdc-error: {{ pdc_design.error | escape }};
+    --pdc-radius: {{ pdc_design.radius | default: 8 | at_most: 24 }}px;
+  {%- endcapture -%}
+  {%- assign pdc_classes = pdc_classes | append: ' pdc--border-' | append: pdc_design.border -%}
+  {%- if pdc_design.shadow -%}{%- assign pdc_classes = pdc_classes | append: ' pdc--shadow' -%}{%- endif -%}
+  {%- if pdc_design.layout == 'stacked' -%}{%- assign pdc_classes = pdc_classes | append: ' pdc--stacked' -%}{%- endif -%}
+  {%- unless pdc_design.icons -%}{%- assign pdc_classes = pdc_classes | append: ' pdc--no-icons' -%}{%- endunless -%}
+  {%- assign pdc_brightness = pdc_design.background | color_brightness -%}
+  {%- if pdc_brightness < 140 -%}{%- assign pdc_classes = pdc_classes | append: ' pdc--dark' -%}{%- endif -%}
+{%- else -%}
+  {%- capture pdc_style -%}--pdc-accent: {{ block.settings.button_color }};{%- endcapture -%}
+  {%- assign pdc_classes = pdc_classes | append: ' pdc--border-subtle' -%}
+{%- endif -%}
+
+<div
+  class="{{ pdc_classes }}"
+  style="{{ pdc_style | strip_newlines }}"
+  data-pincode-checker
+  data-country="{{ pdc_country }}"
+>
   {% if block.settings.heading != blank %}
     <p class="pdc__heading">{{ block.settings.heading }}</p>
   {% endif %}
@@ -29,11 +63,7 @@
       placeholder="{{ pdc_placeholder }}"
       aria-label="{{ pdc_placeholder }}"
     >
-    <button
-      class="pdc__button"
-      type="submit"
-      style="background: {{ block.settings.button_color }};"
-    >
+    <button class="pdc__button" type="submit">
       {{ block.settings.button_text }}
     </button>
   </form>
@@ -55,7 +85,13 @@
       "info": "Leave empty to show Pincode / ZIP code / Postcode automatically by country"
     },
     { "type": "text", "id": "button_text", "label": "Button text", "default": "Check" },
-    { "type": "color", "id": "button_color", "label": "Button color", "default": "#000000" }
+    {
+      "type": "color",
+      "id": "button_color",
+      "label": "Button color",
+      "default": "#000000",
+      "info": "Used until you publish a design in the app (Pincode Checker → Design)"
+    }
   ]
 }
 {% endschema %}

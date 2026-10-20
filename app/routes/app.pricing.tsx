@@ -13,6 +13,7 @@ import {
   getCurrentPlan,
   getTrialDaysLeft,
 } from "../billing.server";
+import { syncDesignAccess } from "../design.server";
 import {
   PLANS,
   PLAN_ORDER,
@@ -25,9 +26,11 @@ import {
 
 // ---------- LOADER ----------
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { billing, session } = await authenticate.admin(request);
+  const { admin, billing, session } = await authenticate.admin(request);
   const shop = session.shop;
   const current = await getCurrentPlan(billing, shop);
+  // Approve ke baad yahin wapas aate hain: design on/off sync karo
+  await syncDesignAccess(admin, PLANS[current.key].features.design).catch(() => {});
 
   await connectDB();
   const [pincodes, zones] = await Promise.all([
@@ -69,6 +72,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       { shop: session.shop },
       { $set: { plan: "free", interval: "monthly", subscriptionId: null } },
     );
+    await syncDesignAccess(admin, false).catch(() => {}); // Free = Classic look
     return { ok: true, message: "Switched to the Free plan" };
   }
 
@@ -156,7 +160,8 @@ const ROWS: Row[] = [
   { label: "Holidays, cut-off & working days", value: () => true },
   { label: "Live cut-off countdown", value: (p) => p.features.countdown },
   { label: "CSV export", value: (p) => p.features.export },
-  { label: "Widget design options", value: (p) => p.features.design },
+  { label: "5 widget styles + button color", value: () => true },
+  { label: "Full design control (colors, corners, shadow)", value: (p) => p.features.design },
   { label: 'Remove "Powered by" badge', value: (p) => p.features.removeBadge },
   { label: "Analytics", value: (p) => p.features.analytics || false },
   { label: "Priority support", value: (p) => p.features.prioritySupport },
