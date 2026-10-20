@@ -1,6 +1,13 @@
 (function () {
   var root = (window.Shopify && Shopify.routes && Shopify.routes.root) || "/";
 
+  // 147 → "2h 27m"
+  function fmt(minutes) {
+    var h = Math.floor(minutes / 60);
+    var m = minutes % 60;
+    return h ? h + "h " + m + "m" : m + "m";
+  }
+
   function init(box) {
     if (box.dataset.pdcReady) return;
     box.dataset.pdcReady = "1";
@@ -10,12 +17,10 @@
     var button = box.querySelector(".pdc__button");
     var result = box.querySelector(".pdc__result");
 
-    // naya: desh Liquid se aata hai (data-country)
     var country = (box.dataset.country || "IN").toUpperCase();
-    // naya: har desh ka last code alag yaad rahe
     var STORAGE_KEY = "pdc_last_postcode_" + country;
+    var timer = null; // naya: countdown ka interval
 
-    // naya: letters, number, space, dash chalenge; capital mein; max 10
     input.addEventListener("input", function () {
       input.value = input.value.toUpperCase().replace(/[^A-Z0-9 -]/g, "").slice(0, 10);
     });
@@ -25,7 +30,6 @@
       check(input.value.trim());
     });
 
-    // pichhla code yaad rakho
     try {
       var saved = localStorage.getItem(STORAGE_KEY);
       if (saved) {
@@ -34,61 +38,102 @@
       }
     } catch (err) {}
 
-    // naya: browser mein jaldi wala basic check (asli check server par hota hai)
     function looksValid(code) {
       var clean = code.replace(/[\s-]/g, "");
       if (country === "IN") return /^\d{6}$/.test(clean);
       return /^[A-Z0-9]{3,10}$/.test(clean);
     }
 
-    function show(type, lines) {
-      result.className = "pdc__result pdc__result--" + type;
-      result.textContent = "";
-      lines.forEach(function (text) {
-        var p = document.createElement("p");
-        p.textContent = text;
-        result.appendChild(p);
-      });
+    function stopTimer() {
+      if (timer) {
+        clearInterval(timer);
+        timer = null;
+      }
     }
 
-    function check(code) {
+    // Result saaf karo aur naya type lagao
+    function reset(type) {
+      stopTimer();
+      result.className = "pdc__result pdc__result--" + type;
+      result.textContent = "";
+    }
+
+    // Ek line jodo (textContent = safe, koi HTML inject nahi ho sakta)
+    function line(text, cls) {
+      var p = document.createElement("p");
+      p.textContent = text;
+      if (cls) p.className = cls;
+      result.appendChild(p);
+      return p;
+    }
+
+    // naya: live countdown; cut-off nikalte hi dobara check karke nayi date lao
+    function startCountdown(minutesLeft, suffix, code) {
+      var deadline = Date.now() + minutesLeft * 60000;
+      var el = line("", "pdc__countdown");
+      function tick() {
+        var left = Math.ceil((deadline - Date.now()) / 60000);
+        if (left <= 0) {
+          stopTimer();
+          check(code, true);
+          return;
+        }
+        el.textContent = "⏰ Order within " + fmt(left) + " " + suffix;
+      }
+      tick();
+      timer = setInterval(tick, 30000);
+    }
+
+    function check(code, silent) {
       if (!looksValid(code)) {
-        show("error", [
-          country === "IN" ? "Please enter a valid 6-digit pincode" : "Please enter a valid postal code",
-        ]);
+        reset("error");
+        line(country === "IN" ? "Please enter a valid 6-digit pincode" : "Please enter a valid postal code");
         return;
       }
       button.disabled = true;
-      show("loading", ["Checking..."]);
+      if (!silent) {
+        reset("loading");
+        line("Checking...");
+      }
 
       fetch(
         root +
           "apps/pincode/check?pincode=" + encodeURIComponent(code) +
-          "&country=" + encodeURIComponent(country), // naya
+          "&country=" + encodeURIComponent(country),
         { headers: { Accept: "application/json" } }
       )
         .then(function (res) { return res.json(); })
         .then(function (data) {
           if (!data.ok) {
-            show("error", [data.message || "Something went wrong"]);
+            reset("error");
+            line(data.message || "Something went wrong");
             return;
           }
           try { localStorage.setItem(STORAGE_KEY, code); } catch (err) {}
 
           if (data.available) {
-            show("success", [
-              "🚚 " + data.message,
+            reset("success");
+            line("🚚 " + data.message);
+            line(
               data.codAvailable ? "💵 Cash on Delivery available" : "Cash on Delivery not available",
-            ]);
-            if (!data.codAvailable) {
-              result.lastElementChild.classList.add("pdc__no-cod");
+              data.codAvailable ? "" : "pdc__no-cod"
+            );
+            if (typeof data.cutoffMinutesLeft === "number" && data.cutoffMinutesLeft > 0) {
+              startCountdown(
+                data.cutoffMinutesLeft,
+                data.dispatchToday ? "for dispatch today" : "to get it by " + data.deliveryTo,
+                code
+              );
             }
+            if (data.disclaimer) line(data.disclaimer, "pdc__note");
           } else {
-            show("error", [data.message]);
+            reset("error");
+            line(data.message);
           }
         })
         .catch(function () {
-          show("error", ["Could not check right now. Please try again."]);
+          reset("error");
+          line("Could not check right now. Please try again.");
         })
         .finally(function () {
           button.disabled = false;
@@ -106,7 +151,6 @@
     initAll();
   }
 
-  // theme editor mein block add/move hone par
   document.addEventListener("shopify:section:load", initAll);
   document.addEventListener("shopify:block:select", initAll);
 })();

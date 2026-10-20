@@ -6,16 +6,18 @@ export const DEFAULT_SETTINGS = {
   processingDays: 1,
   cutoffHour: 14, // 14 = 2:00 PM, 24 = koi cut-off nahi
   workingDays: [1, 2, 3, 4, 5, 6], // 0 = Sunday ... 6 = Saturday
-  holidays: [] as string[], // "2026-11-08" format
-  availableMessage: "Delivery by {from} – {to}",
+  holidays: [] as string[],
+  availableMessage: "Estimated delivery by {from} – {to}", // naya: "Estimated"
   unavailableMessage: "Sorry, we don't deliver to this pincode yet",
+  showCountdown: true, // naya: cut-off countdown dikhana hai ya nahi
+  disclaimer: "", // naya: result ke neeche chhota note (khaali = nahi dikhega)
 };
 
 export type ShopSettings = typeof DEFAULT_SETTINGS;
 
 const SettingsSchema = new Schema(
   {
-    shop: { type: String, required: true, unique: true }, // har store ki ek hi settings
+    shop: { type: String, required: true, unique: true },
     timezone: { type: String, default: DEFAULT_SETTINGS.timezone },
     processingDays: { type: Number, default: DEFAULT_SETTINGS.processingDays, min: 0, max: 30 },
     cutoffHour: { type: Number, default: DEFAULT_SETTINGS.cutoffHour, min: 0, max: 24 },
@@ -23,6 +25,8 @@ const SettingsSchema = new Schema(
     holidays: { type: [String], default: () => [] },
     availableMessage: { type: String, default: DEFAULT_SETTINGS.availableMessage },
     unavailableMessage: { type: String, default: DEFAULT_SETTINGS.unavailableMessage },
+    showCountdown: { type: Boolean, default: true }, // naya
+    disclaimer: { type: String, default: "" }, // naya
   },
   { timestamps: true },
 );
@@ -33,7 +37,6 @@ export const Settings: Model<SettingsDoc> =
   (mongoose.models.Settings as Model<SettingsDoc>) ||
   mongoose.model<SettingsDoc>("Settings", SettingsSchema);
 
-// Store ki settings laao; save nahi ki to defaults
 export async function getSettings(shop: string): Promise<ShopSettings> {
   const doc = await Settings.findOne({ shop }).lean();
   return {
@@ -44,5 +47,7 @@ export async function getSettings(shop: string): Promise<ShopSettings> {
     holidays: doc?.holidays ? [...doc.holidays] : [],
     availableMessage: doc?.availableMessage || DEFAULT_SETTINGS.availableMessage,
     unavailableMessage: doc?.unavailableMessage || DEFAULT_SETTINGS.unavailableMessage,
+    showCountdown: doc?.showCountdown ?? DEFAULT_SETTINGS.showCountdown, // naya
+    disclaimer: doc?.disclaimer ?? "", // naya
   };
 }

@@ -1,11 +1,22 @@
+/* ---------- Box ---------- */
 .pdc {
   margin: 16px 0;
   padding: 16px;
   border: 1px solid rgba(0, 0, 0, 0.12);
   border-radius: 8px;
 }
-.pdc__heading { margin: 0 0 10px; font-weight: 600; }
-.pdc__form { display: flex; gap: 8px; }
+
+.pdc__heading {
+  margin: 0 0 10px;
+  font-weight: 600;
+}
+
+/* ---------- Input + button ---------- */
+.pdc__form {
+  display: flex;
+  gap: 8px;
+}
+
 .pdc__input {
   flex: 1;
   min-width: 0;
@@ -14,6 +25,7 @@
   border-radius: 6px;
   font-size: 15px;
 }
+
 .pdc__button {
   padding: 10px 18px;
   border: 0;
@@ -22,11 +34,35 @@
   font-weight: 600;
   cursor: pointer;
 }
-.pdc__button:disabled { opacity: 0.6; cursor: wait; }
-.pdc__result:empty { display: none; }
-.pdc__result { margin-top: 10px; font-size: 14px; }
-.pdc__result p { margin: 4px 0; }
-.pdc__result--success { color: #0a7d32; }
-.pdc__result--error   { color: #c0392b; }
-.pdc__result--loading { color: #666; }
+
+.pdc__button:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+/* ---------- Result ---------- */
+.pdc__result:empty {
+  display: none;
+}
+
+.pdc__result {
+  margin-top: 10px;
+  font-size: 14px;
+}
+
+.pdc__result p {
+  margin: 4px 0;
+}
+
+.pdc__result--success { color: #0a7d32; } /* hara: delivery available */
+.pdc__result--error   { color: #c0392b; } /* laal: galat code ya delivery nahi */
+.pdc__result--loading { color: #666; }    /* grey: "Checking..." */
+
+/* COD nahi hai to laal */
 .pdc__result .pdc__no-cod { color: #c0392b; }
+
+/* naya: countdown (naarangi, bold) */
+.pdc__result .pdc__countdown { color: #b25e09; font-weight: 600; }
+
+/* naya: merchant ka note (halka grey, chhota) */
+.pdc__result .pdc__note { color: #8a8a8a; font-size: 12px; margin-top: 8px; }
