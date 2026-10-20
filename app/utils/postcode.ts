@@ -30,3 +30,19 @@ export function normalizePostcode(raw: unknown, country: string): string {
 export function isValidPostcode(code: string, country: string): boolean {
   return (PATTERNS[country] ?? FALLBACK).test(code);
 }
+
+// Zones ke liye: "4520, 4521\n*" -> { prefixes: ["4520","4521","*"], invalid: [] }
+export function parsePrefixes(raw: string) {
+  const prefixes: string[] = [];
+  const invalid: string[] = [];
+  for (const part of String(raw || "").split(/[,\n;]+/)) {
+    const p = part.toUpperCase().replace(/[\s-]/g, "");
+    if (!p) continue;
+    if (p !== "*" && !/^[A-Z0-9]{1,10}$/.test(p)) {
+      invalid.push(part.trim());
+      continue;
+    }
+    if (!prefixes.includes(p)) prefixes.push(p);
+  }
+  return { prefixes, invalid };
+}

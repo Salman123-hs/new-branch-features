@@ -1,9 +1,11 @@
 import type { LoaderFunctionArgs } from "react-router";
 import { authenticate } from "../shopify.server";
 import { connectDB } from "../mongo.server";
-import { Pincode } from "../models/pincode.server";
+import { findDeliveryRule } from "../models/zone.server";
 import { getSettings } from "../models/settings.server";
 import { recordCheck } from "../models/stats.server";
+import { recordMonthlyCheck } from "../models/usage.server";
+import { getShopPlan } from "../limits.server";
 import { isValidPostcode, normalizeCountry, normalizePostcode } from "../utils/postcode";
 import { calculateDelivery, fillMessage, formatDay, toISODate } from "../utils/delivery-date";
 
@@ -24,46 +26,55 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   }
 
   await connectDB();
-  const [doc, schedule] = await Promise.all([
-    Pincode.findOne({ shop, country, pincode }).lean(),
+  const [rule, schedule, plan] = await Promise.all([
+    findDeliveryRule(shop, country, pincode),
     getSettings(shop),
+    getShopPlan(shop),
   ]);
 
-  if (!doc) {
+  // Mahine ke checks gino (limit cross hone pe bhi widget chalta rahega)
+  recordMonthlyCheck(shop);
+
+  const poweredBy = !plan.features.removeBadge;
+
+  if (!rule) {
     recordCheck(shop, false);
     return Response.json({
       ok: true,
       available: false,
       pincode,
       country,
+      poweredBy,
       message: schedule.unavailableMessage,
     });
   }
 
   recordCheck(shop, true);
 
-  // cut-off, processing days, working days aur holidays ke hisaab se
-  const r = calculateDelivery(schedule, doc.minDays, doc.maxDays);
+  const r = calculateDelivery(schedule, rule.minDays, rule.maxDays);
   const from = formatDay(r.from);
   const to = formatDay(r.to);
+
+  // Countdown sirf Pro/Plus mein + merchant ne on kiya ho
+  const countdownOn = schedule.showCountdown && plan.features.countdown;
 
   return Response.json({
     ok: true,
     available: true,
     pincode,
     country,
-    minDays: doc.minDays,
-    maxDays: doc.maxDays,
-    codAvailable: doc.codAvailable,
+    source: rule.source,
+    zone: rule.zoneName,
+    minDays: rule.minDays,
+    maxDays: rule.maxDays,
+    codAvailable: rule.codAvailable,
     deliveryFrom: from,
     deliveryTo: to,
     dispatchDate: formatDay(r.dispatch),
-    // Settings mein countdown off ho to null bhejo, widget line nahi dikhayega
-    cutoffMinutesLeft: schedule.showCountdown ? r.minutesLeft : null,
-    // aaj hi dispatch hoga? (processing days 0 ho to true)
+    cutoffMinutesLeft: countdownOn ? r.minutesLeft : null,
     dispatchToday: toISODate(r.dispatch) === toISODate(r.today),
-    // merchant ka note, result ke neeche grey mein
     disclaimer: schedule.disclaimer,
+    poweredBy,
     message: fillMessage(schedule.availableMessage, from, to),
   });
 };

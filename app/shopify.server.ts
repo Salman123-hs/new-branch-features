@@ -5,9 +5,11 @@ import "@shopify/shopify-app-react-router/adapters/node";
 import {
   ApiVersion,
   AppDistribution,
+  BillingInterval,
   shopifyApp,
 } from "@shopify/shopify-app-react-router/server";
 import { MongoDBSessionStorage } from "@shopify/shopify-app-session-storage-mongodb";
+import { PLANS, TRIAL_DAYS } from "./utils/plans";
 
 const shopify = shopifyApp({
   apiKey: process.env.SHOPIFY_API_KEY,
@@ -21,6 +23,25 @@ const shopify = shopifyApp({
     process.env.MONGODB_DB!,
   ),
   distribution: AppDistribution.AppStore,
+  // 💰 Paid plans (prices app/utils/plans.ts se aate hain)
+    billing: {
+    [PLANS.pro.billingName]: {
+      lineItems: [{ amount: PLANS.pro.price, currencyCode: "USD", interval: BillingInterval.Every30Days }],
+      trialDays: TRIAL_DAYS,
+    },
+    [PLANS.pro.billingNameYearly]: {
+      lineItems: [{ amount: PLANS.pro.yearlyPrice, currencyCode: "USD", interval: BillingInterval.Annual }],
+      trialDays: TRIAL_DAYS,
+    },
+    [PLANS.plus.billingName]: {
+      lineItems: [{ amount: PLANS.plus.price, currencyCode: "USD", interval: BillingInterval.Every30Days }],
+      trialDays: TRIAL_DAYS,
+    },
+    [PLANS.plus.billingNameYearly]: {
+      lineItems: [{ amount: PLANS.plus.yearlyPrice, currencyCode: "USD", interval: BillingInterval.Annual }],
+      trialDays: TRIAL_DAYS,
+    },
+  },
   future: {
     expiringOfflineAccessTokens: true,
   },

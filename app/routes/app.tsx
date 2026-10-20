@@ -21,6 +21,8 @@ export default function App() {
         <s-link href="/app">Home</s-link>
         <s-link href="/app/pincodes">Pincodes</s-link>
         <s-link href="/app/settings">Settings</s-link>
+        <s-link href="/app/pricing">Plans</s-link>
+        <s-link href="/app/zones">Zones</s-link>
         <s-link href="/app/additional">Additional page</s-link>
       </s-app-nav>
       <Outlet />
